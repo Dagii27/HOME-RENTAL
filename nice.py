@@ -33,15 +33,14 @@ MAX_PHOTOS = 10
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- States for ConversationHandlers ---
+# --- States for ConversationHandlers (MODIFIED) ---
 COMPANY_NAME = 0
 (
-    LISTING_TYPE, LOCATION_CHOICE, OTHER_LOCATION_INPUT,
-    BEDROOM_CHOICE, BATHROOM_CHOICE, # <-- NEW STATES
+    LISTING_TYPE, LOCATION_INPUT, BEDROOM_CHOICE, BATHROOM_CHOICE,
     HOME_TYPE_CHOICE, EXACT_PRICE_INPUT, DESCRIPTION, PHOTOS, CONFIRMATION
-) = range(1, 11)
-SEARCH_TYPE, SEARCH_LOCATION = range(11, 13)
-EDIT_PRICE = 13
+) = range(1, 10)
+SEARCH_TYPE, SEARCH_LOCATION = range(10, 12)
+EDIT_PRICE = 12
 
 
 # --- Keyboards & UI Helpers ---
@@ -52,16 +51,8 @@ def get_main_keyboard() -> ReplyKeyboardMarkup:
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-def get_location_keyboard() -> InlineKeyboardMarkup:
-    keyboard = [
-        [InlineKeyboardButton("Addis Ababa", callback_data="loc_Addis Ababa"), InlineKeyboardButton("Adama", callback_data="loc_Adama")],
-        [InlineKeyboardButton("Bahir Dar", callback_data="loc_Bahir Dar"), InlineKeyboardButton("Gondar", callback_data="loc_Gondar")],
-        [InlineKeyboardButton("Hawassa", callback_data="loc_Hawassa"), InlineKeyboardButton("Jimma", callback_data="loc_Jimma")],
-        [InlineKeyboardButton("Other (Not Listed)", callback_data="loc_Other")],
-    ]
-    return InlineKeyboardMarkup(keyboard)
+# --- REMOVED: get_location_keyboard() is no longer needed ---
 
-# --- NEW KEYBOARD FUNCTION ---
 def get_room_count_keyboard(room_type: str) -> InlineKeyboardMarkup:
     """Generates a keyboard for selecting room counts (bed or bath)."""
     prefix = "bed_" if room_type == "bed" else "bath_"
@@ -117,6 +108,8 @@ def format_public_post_text(details: dict, broker_id: int) -> str:
               f"From: {WEBSITE} | @{BOT_USERNAME} | @{CHANNEL_USERNAME}")
     hashtags = generate_hashtags(details)
     def e(text): return escape(str(text))
+
+    # Price formatting
     price_str = details.get('price', 'Contact for price')
     try:
         price_num = int(re.sub(r'[^\d]', '', price_str))
@@ -124,12 +117,28 @@ def format_public_post_text(details: dict, broker_id: int) -> str:
         formatted_price = f"{price_num:,} ETB{price_suffix}"
     except (ValueError, TypeError):
         formatted_price = price_str
-    return (f"<b>✨ NEW LISTING: {title_type} ✨</b>\n"
-            f"-----------------------------------------\n\n"
-            f"<b>📍 Location:</b> {e(details.get('location', 'N/A'))}\n"
-            f"<b>💰 Price:</b> {e(formatted_price)}\n\n"
-            f"A new property is available that might be your next home. Full description and photos are waiting for you.\n\n"
-            f"<b>Click the button below to see everything instantly and get the broker's contact details directly from me.</b> 👇\n\n"
+
+    # Description snippet
+    description = details.get('description', '')
+    desc_snippet = (description[:150] + '...') if len(description) > 150 else description
+
+    # Building the core info block
+    info_lines = [
+        f"<b>📍 Location:</b> {e(details.get('location', 'N/A'))}",
+        f"<b>💰 Price:</b> {e(formatted_price)}"
+    ]
+    if details.get('home_type') and details.get('home_type') not in ["Other", "N/A"]:
+        info_lines.append(f"<b>🏠 Home Type:</b> {e(details.get('home_type'))}")
+    if details.get('bedrooms') and details.get('bedrooms') != 'N/A':
+        info_lines.append(f"<b>🛏️ Rooms:</b> {e(details.get('bedrooms'))} Bed, {e(details.get('bathrooms', 'N/A'))} Bath")
+    if desc_snippet:
+         info_lines.append(f"\n<b>📝 Description:</b> {e(desc_snippet)}")
+
+    info_block = "\n".join(info_lines)
+
+    return (f"<b>✨ NEW LISTING: {title_type} ✨</b>\n\n"
+            f"{info_block}\n\n"
+            f"<b>Click the button below to see all photos and get the broker's contact details instantly.</b> 👇\n\n"
             f"{footer}\n\n{hashtags}")
 
 def format_admin_approval_caption(details: dict, broker_info: dict) -> str:
@@ -165,24 +174,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             if not listing: await update.message.reply_text("Sorry, this listing is no longer available."); return ConversationHandler.END
             if listing['status'] == 'taken': await update.message.reply_text("<b>This property is no longer available.</b>", parse_mode=ParseMode.HTML); return ConversationHandler.END
             if action == "view":
-                await update.message.reply_text(f"Loading details for listing <code>{format_user_facing_id(post_id)}</code>...", parse_mode=ParseMode.HTML)
-                photos = listing.get('photo_file_ids', []); details = listing.get('details', {})
-                if photos: await context.bot.send_media_group(chat_id=user.id, media=[InputMediaPhoto(media=pid) for pid in photos])
-                caption_parts = []
-                if details.get('home_type'): caption_parts.append(f"<b>🏠 Home Type:</b> {escape(details.get('home_type'))}")
-                if details.get('bedrooms') and details.get('bedrooms') != 'N/A': caption_parts.append(f"<b>🛏️ Rooms:</b> {escape(str(details.get('bedrooms', 'N/A')))} Bed, {escape(str(details.get('bathrooms', 'N/A')))} Bath")
-                if details.get('location'): caption_parts.append(f"<b>📍 Location:</b> {escape(details.get('location'))}")
-                price_str = details.get('price', 'Contact for price')
-                try:
-                    price_num = int(re.sub(r'[^\d]', '', str(price_str)))
-                    listing_type = details.get('listing_type', 'rent')
-                    price_suffix = "/month" if listing_type == 'rent' else ""
-                    formatted_price = f"{price_num:,} ETB{price_suffix}"
-                except (ValueError, TypeError): formatted_price = price_str
-                caption_parts.append(f"<b>💰 Price:</b> {escape(formatted_price)}")
-                caption = "\n".join(caption_parts)
-                if details.get('description'): caption += f"\n\n<b>📝 Description:</b>\n{escape(details.get('description'))}"
-                await context.bot.send_message(chat_id=user.id, text=caption, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💬 Contact Broker", url=f"https://t.me/{BOT_USERNAME}?start=contact_{post_id}")]]))
+                await update.message.reply_text(f"Loading listing <code>{format_user_facing_id(post_id)}</code>...", parse_mode=ParseMode.HTML)
+                photos = listing.get('photo_file_ids', [])
+                if photos:
+                    try: await context.bot.send_media_group(chat_id=user.id, media=[InputMediaPhoto(media=pid) for pid in photos])
+                    except BadRequest as e: logger.error(f"Failed to send media group for post {post_id}: {e}"); await update.message.reply_text("An error occurred while loading the photos.")
+                else: await update.message.reply_text("<i>(No photos were provided for this listing)</i>", parse_mode=ParseMode.HTML)
+                broker_info = db.get_broker_details(listing['broker_id'])
+                if not broker_info: await update.message.reply_text("Sorry, broker information could not be found."); return ConversationHandler.END
+                contact_message = (f"<b>Contact details for listing {format_user_facing_id(post_id)}:</b>\n\n"
+                                   f"<b>Broker:</b> {escape(broker_info.get('first_name', 'N/A'))}\n"
+                                   f"<b>Phone:</b> <code>{escape(broker_info.get('phone_number', 'N/A'))}</code>\n\n"
+                                   "Feel free to call them to arrange a viewing.")
+                await update.message.reply_text(contact_message, parse_mode=ParseMode.HTML, reply_markup=get_main_keyboard())
                 return ConversationHandler.END
             elif action == "contact":
                 broker_info = db.get_broker_details(listing['broker_id'])
@@ -214,26 +218,23 @@ async def post_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await context.bot.send_message(update.effective_chat.id, "Is the property for rent or for sale?", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏡 For Rent", callback_data="type_rent")], [InlineKeyboardButton("🔑 For Sale", callback_data="type_sale")]]))
     return LISTING_TYPE
 
+# --- MODIFIED FUNCTION ---
 async def handle_listing_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query; await query.answer()
     context.user_data['details'] = {'listing_type': query.data.split('_', 1)[1]}; context.user_data['photos'] = []
-    await query.message.edit_text("📍 <b>Step 1: Please choose a location</b>", reply_markup=get_location_keyboard(), parse_mode=ParseMode.HTML)
-    return LOCATION_CHOICE
+    await query.message.edit_text(
+        "📍 <b>Step 1: Please enter the property's location.</b>\n\n"
+        "<i>(e.g., 'Bole, near Edna Mall' or 'CMC, behind St. Michael church')</i>",
+        parse_mode=ParseMode.HTML
+    )
+    return LOCATION_INPUT
 
-async def handle_location_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query; await query.answer()
-    location_choice = query.data.split('loc_', 1)[1]
-    if location_choice == "Other":
-        await query.message.edit_text("🗺️ You selected 'Other'.\nPlease type the city or specific area now.", parse_mode=ParseMode.HTML)
-        return OTHER_LOCATION_INPUT
-    else:
-        context.user_data['details']['location'] = location_choice
-        await query.message.edit_text("🛏️ <b>Step 2: How many bedrooms?</b>", reply_markup=get_room_count_keyboard('bed'), parse_mode=ParseMode.HTML)
-        return BEDROOM_CHOICE
-
-async def handle_other_location_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+# --- MODIFIED FUNCTION: Renamed and simplified ---
+async def handle_location_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     location = update.message.text.strip()
-    if not location or len(location) < 3: await update.message.reply_text("That location is too short. Please try again."); return OTHER_LOCATION_INPUT
+    if not location or len(location) < 5:
+        await update.message.reply_text("That location is too short. Please be more specific and try again.")
+        return LOCATION_INPUT
     context.user_data['details']['location'] = location
     await update.message.reply_text("🛏️ <b>Step 2: How many bedrooms?</b>", reply_markup=get_room_count_keyboard('bed'), parse_mode=ParseMode.HTML)
     return BEDROOM_CHOICE
@@ -289,14 +290,19 @@ async def my_listings_start(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             if keyboard: await context.bot.send_message(update.effective_chat.id, f"<b>{escape(details.get('location', 'N/A'))}</b>\nStatus: <i>{status_icon}</i> | Price: {escape(details.get('price', 'N/A'))}", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
         await update.message.reply_text("You can manage your listings above or choose an option from the menu.", reply_markup=get_main_keyboard())
 
+# --- MODIFIED FUNCTION ---
 async def resubmit_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query; await query.answer(); post_id = _get_post_id_from_callback(query.data, "resubmit_start_")
     listing = db.get_listing_details(post_id)
     if not listing or str(listing.get('broker_id')) != str(query.from_user.id): await query.edit_message_text("❌ Error: Not your listing."); return ConversationHandler.END
     context.user_data.clear(); context.user_data['edit_post_id'] = post_id; context.user_data['details'] = {'listing_type': listing['details']['listing_type']}; context.user_data['photos'] = listing.get('photo_file_ids', [])
     await query.message.edit_text("✏️ <b>Editing Rejected Listing...</b>", parse_mode=ParseMode.HTML)
-    await context.bot.send_message(chat_id=query.from_user.id, text="📍 <b>Step 1: Please choose a location</b>", reply_markup=get_location_keyboard(), parse_mode=ParseMode.HTML)
-    return LOCATION_CHOICE
+    await context.bot.send_message(
+        chat_id=query.from_user.id,
+        text="📍 <b>Step 1: Please enter the updated location for your listing.</b>",
+        parse_mode=ParseMode.HTML
+    )
+    return LOCATION_INPUT
 
 async def handle_photos(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if context.user_data.get('edit_post_id') and not context.user_data.get('cleared_old_photos'):
@@ -324,8 +330,6 @@ async def show_confirmation_preview(update: Update, context: ContextTypes.DEFAUL
     await query.message.reply_text(f"<b>--- PREVIEW ---</b>\n\n{preview_caption}", parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Submit for Approval", callback_data="submit_post")], [InlineKeyboardButton("❌ Discard", callback_data="cancel_post")]]))
     return CONFIRMATION
     
-# ... (rest of the file is identical, only main() needs updating) ...
-
 async def search_listings_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("🔍 <b>Search Listings</b>", reply_markup=ReplyKeyboardRemove(), parse_mode=ParseMode.HTML)
     await update.message.reply_text("What are you looking for?", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏡 For Rent", callback_data="search_rent")], [InlineKeyboardButton("🔑 For Sale", callback_data="search_sale")]]))
@@ -454,8 +458,7 @@ def main() -> None:
         entry_points=[MessageHandler(filters.Regex("^✍️ Post Listing$"), post_start), CallbackQueryHandler(resubmit_start, pattern="^resubmit_start_")],
         states={
             LISTING_TYPE: [CallbackQueryHandler(handle_listing_type, pattern="^type_")],
-            LOCATION_CHOICE: [CallbackQueryHandler(handle_location_choice, pattern="^loc_")],
-            OTHER_LOCATION_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_other_location_input)],
+            LOCATION_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_location_input)],
             BEDROOM_CHOICE: [CallbackQueryHandler(handle_bedroom_choice, pattern="^bed_")],
             BATHROOM_CHOICE: [CallbackQueryHandler(handle_bathroom_choice, pattern="^bath_")],
             HOME_TYPE_CHOICE: [CallbackQueryHandler(handle_home_type_choice, pattern="^hometype_")],
