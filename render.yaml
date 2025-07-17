@@ -1,0 +1,16 @@
+# render.yaml
+services:
+  # A Worker for our long-running Python bot
+  - type: worker
+    name: telegram-home-bot
+    # Can be python, python3, etc.
+    env: python
+    # How to install dependencies
+    buildCommand: "pip install -r requirements.txt"
+    # The command to start the bot
+    startCommand: "python nice.py"
+    # Configuration for the persistent disk
+    disks:
+      - name: bot-database-disk # A name for the disk
+        mountPath: /var/data  # The location to make it available
+        sizeGB: 1             # 1 GB is more than enough for a JSON file
