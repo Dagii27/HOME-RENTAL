@@ -1,16 +1,21 @@
-# render.yaml
+# render.yaml (Corrected Version)
+
+# First, define the disks that will be available.
+# This is a top-level section.
+disks:
+  - name: bot-database-disk   # A name for the disk
+    mountPath: /var/data       # The location it will be mounted
+    sizeGB: 1                  # 1 GB is plenty for a JSON file
+
+# Second, define the services that will run.
 services:
-  # A Worker for our long-running Python bot
   - type: worker
     name: telegram-home-bot
-    # Can be python, python3, etc.
     env: python
-    # How to install dependencies
     buildCommand: "pip install -r requirements.txt"
-    # The command to start the bot
     startCommand: "python nice.py"
-    # Configuration for the persistent disk
-    disks:
-      - name: bot-database-disk # A name for the disk
-        mountPath: /var/data  # The location to make it available
-        sizeGB: 1             # 1 GB is more than enough for a JSON file
+    # Now, link this service to the disk defined above.
+    # Note: this is 'disk' (singular), not 'disks'.
+    disk:
+      name: bot-database-disk  # Must match the name above
+      mountPath: /var/data     # Must match the mountPath above
